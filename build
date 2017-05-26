@@ -1,0 +1,63 @@
+#!/usr/bin/env node
+
+const chokidar = require('chokidar');
+const fs = require('fs');
+const glob = require('modular-css-glob');
+const mkdirp = require('mkdirp');
+
+mkdirp.sync('dist/public/assets');
+
+const createProcessor = () => (
+	glob({ search: `src/styles/**/*.css` }).then(processor => processor)
+);
+
+const createWatcher = () => Promise.resolve(
+	chokidar.watch(`src/styles/**/*.css`, {
+		ignored: /(^|[\/\\])\../,
+	})
+);
+
+const writeFile = (file, content) => new Promise((resolve, reject) => {
+	fs.writeFile(file, content, err => {
+		if (err) return reject(err);
+		resolve();
+	});
+});
+
+const writeResults = result => Promise.all([
+	writeFile(`dist/public/assets/app.css`, result.css),
+	writeFile(`dist/styles.json`, JSON.stringify(result.compositions, null, '  ')),
+])
+
+Promise.all([
+	createProcessor(),
+	createWatcher(),
+])
+	.then(([processor, watcher]) => (
+		processor.output()
+			.then(writeResults)
+			.then(() => [processor, watcher])
+	))
+	.then(([processor, watcher]) => {
+		console.log('initial write done');
+
+		watcher.on('ready', () => {
+			watcher.on('change', path => {
+				console.log('BEFORE REMOVE', processor._files)
+				processor.remove(path);
+				console.log('AFTER REMOVE', processor._files);
+				processor.file(path);
+				console.log('AFTER ADD', processor._files);
+
+				processor.output()
+					.then(result => {
+						console.log('AFTER OUTPUT', processor._files);
+						console.log('RESULTS', result);
+						return writeResults(result);
+					});
+			});
+		});
+	})
+	.catch(err => {
+		console.error(err);
+	});
